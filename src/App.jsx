@@ -140,7 +140,7 @@ export default function App() {
               </div>
               {selectedWall === wall.id && <div className="selectedBadge">SELECTED — ADDING HERE</div>}
 
-              <div className="wall">
+              <div className="wall" style={{ aspectRatio: `${wall.width} / ${wall.height}` }}>
                 <div className="centerline" />
                 {(items[wall.id] || []).map(item => {
                   const left = (item.x / wall.width) * 100;
