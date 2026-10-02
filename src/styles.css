@@ -39,3 +39,24 @@
     min-height: 0;
   }
 }
+
+
+/* --- CENTRED PHYSICAL WALL COMPARISON ---
+   Every wall keeps the exact global scale, but shorter walls sit centrally
+   beneath the 22 m master wall so opposite sections are easier to compare.
+*/
+.wall {
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+.wallBlock {
+  width: 100%;
+}
+
+/* Keep the wall title/dimensions visually aligned with its centred wall. */
+.wallBlock > .wallHeader,
+.wallBlock > .wallHeading {
+  margin-left: auto;
+  margin-right: auto;
+}
