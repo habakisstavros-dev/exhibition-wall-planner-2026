@@ -1,460 +1,320 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import html2canvas from "html2canvas";
-
-const SCALE = 0.5;
+import "./styles.css";
 
 const PAPER = {
-  A0: [84.1, 118.9],
-  A1: [59.4, 84.1],
-  A2: [42.0, 59.4],
+  A0: { w: 84.1, h: 118.9 },
+  A1: { w: 59.4, h: 84.1 },
+  A2: { w: 42.0, h: 59.4 },
 };
 
 const THEMES = {
   wall1: {
-    label: "Wall 1 — Theme 1",
+    title: "Wall 1 — Theme 1",
     sections: [
-      { key: "w1a", label: "22 m × 2.40 m", width: 2200, height: 240 },
-      { key: "w1b", label: "15.7 m × 2.40 m", width: 1570, height: 240 },
+      { id: "wall1a", title: "Wall 1 — Theme 1 · Section 1", length: 22, height: 2.4 },
+      { id: "wall1b", title: "Wall 1 — Theme 1 · Section 2", length: 15.7, height: 2.4 },
     ],
   },
   wall2: {
-    label: "Wall 2 — Theme 2",
+    title: "Wall 2 — Theme 2",
     sections: [
-      { key: "w2a", label: "15.7 m × 2.40 m", width: 1570, height: 240 },
-      { key: "w2b", label: "9.4 m × 2.40 m", width: 940, height: 240 },
+      { id: "wall2a", title: "Wall 2 — Theme 2 · Section 1", length: 15.7, height: 2.4 },
+      { id: "wall2b", title: "Wall 2 — Theme 2 · Section 2", length: 9.4, height: 2.4 },
     ],
   },
   wall3: {
-    label: "Wall 3 — Theme 3",
+    title: "Wall 3 — Theme 3",
     sections: [
-      { key: "w3", label: "9.4 m × 2.40 m", width: 940, height: 240 },
+      { id: "wall3a", title: "Wall 3 — Theme 3", length: 9.4, height: 2.4 },
     ],
   },
 };
 
-const uid = () =>
-  crypto.randomUUID?.() || Math.random().toString(36).slice(2);
+const STORAGE_KEY = "exhibition-wall-planner-2026-v3";
+const uid = () => Math.random().toString(36).slice(2, 10);
 
-function openDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open("wall-planner", 1);
-    req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains("walls")) {
-        req.result.createObjectStore("walls");
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function dbGet(key) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const req = db.transaction("walls").objectStore("walls").get(key);
-    req.onsuccess = () => resolve(req.result || []);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function dbPut(key, value) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("walls", "readwrite");
-    tx.objectStore("walls").put(value, key);
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-function tileSize(tile) {
-  const [a, b] = PAPER[tile.size];
-  return tile.orientation === "P" ? [a, b] : [b, a];
+function loadSaved() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+  } catch {
+    return {};
+  }
 }
 
 export default function App() {
   const [themeKey, setThemeKey] = useState("wall1");
-  const [layouts, setLayouts] = useState({});
-  const [ready, setReady] = useState(false);
-  const [selected, setSelected] = useState(null);
+  const [selectedSection, setSelectedSection] = useState("wall1a");
+  const [items, setItems] = useState(loadSaved);
+  const [selectedItem, setSelectedItem] = useState(null);
   const [clean, setClean] = useState(false);
-
-  const themeRef = useRef(null);
-  const sectionRefs = useRef({});
+  const [pendingPhotoId, setPendingPhotoId] = useState(null);
+  const fileInput = useRef(null);
+  const exportRef = useRef(null);
   const drag = useRef(null);
-  const timer = useRef(null);
 
   const theme = THEMES[themeKey];
+  const activeSection = useMemo(
+    () => theme.sections.find((s) => s.id === selectedSection) || theme.sections[0],
+    [theme, selectedSection]
+  );
 
   useEffect(() => {
-    let cancelled = false;
-    setReady(false);
-
-    Promise.all(
-      theme.sections.map(async (section) => [
-        section.key,
-        await dbGet(section.key),
-      ])
-    ).then((entries) => {
-      if (cancelled) return;
-      setLayouts(Object.fromEntries(entries));
-      setReady(true);
-      setSelected(null);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [themeKey]);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  }, [items]);
 
   useEffect(() => {
-    if (!ready) return;
-    theme.sections.forEach((section) => {
-      dbPut(section.key, layouts[section.key] || []);
-    });
-  }, [layouts, ready, theme]);
+    if (!theme.sections.some((s) => s.id === selectedSection)) {
+      setSelectedSection(theme.sections[0].id);
+    }
+    setSelectedItem(null);
+  }, [themeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function showControls(sectionKey, id) {
-    const token = `${sectionKey}:${id}`;
-    setSelected(token);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => setSelected(null), 3500);
-  }
+  const sectionItems = (id) => items[id] || [];
 
-  function updateSection(sectionKey, updater) {
-    setLayouts((current) => ({
-      ...current,
-      [sectionKey]: updater(current[sectionKey] || []),
-    }));
+  function updateSection(id, updater) {
+    setItems((prev) => ({ ...prev, [id]: updater(prev[id] || []) }));
   }
 
   function addFrame(size) {
-    const sections = theme.sections;
-    const section = sections[Math.floor(Math.random() * sections.length)];
-    const orientation = Math.random() > 0.45 ? "P" : "L";
-    const [a, b] = PAPER[size];
-    const [w, h] = orientation === "P" ? [a, b] : [b, a];
+    const section = activeSection;
+    const existing = sectionItems(section.id);
+    const base = PAPER[size];
+    const portrait = existing.length % 2 === 0;
+    const wCm = portrait ? base.w : base.h;
+    const hCm = portrait ? base.h : base.w;
 
-    updateSection(section.key, (tiles) => [
-      ...tiles,
-      {
-        id: uid(),
-        size,
-        orientation,
-        x: Math.max(0, Math.random() * (section.width - w)),
-        y: Math.max(0, Math.random() * (section.height - h)),
-      },
-    ]);
+    const next = {
+      id: uid(),
+      size,
+      rotated: !portrait,
+      x: Math.min(88, 3 + (existing.length * 8) % 82),
+      y: 50,
+      wCm,
+      hCm,
+      img: null,
+    };
+    updateSection(section.id, (arr) => [...arr, next]);
+    setSelectedItem({ sectionId: section.id, itemId: next.id });
   }
 
-  function rotate(sectionKey, id) {
-    updateSection(sectionKey, (tiles) =>
-      tiles.map((tile) =>
-        tile.id === id
-          ? {
-              ...tile,
-              orientation: tile.orientation === "P" ? "L" : "P",
-            }
-          : tile
+  function rotateItem(sectionId, itemId) {
+    updateSection(sectionId, (arr) =>
+      arr.map((it) =>
+        it.id === itemId
+          ? { ...it, rotated: !it.rotated, wCm: it.hCm, hCm: it.wCm }
+          : it
       )
     );
-    showControls(sectionKey, id);
   }
 
-  function remove(sectionKey, id) {
-    updateSection(sectionKey, (tiles) =>
-      tiles.filter((tile) => tile.id !== id)
-    );
-    setSelected(null);
+  function deleteItem(sectionId, itemId) {
+    updateSection(sectionId, (arr) => arr.filter((it) => it.id !== itemId));
+    setSelectedItem(null);
   }
 
-  function choosePhoto(sectionKey, id) {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "image/*";
+  function choosePhoto(sectionId, itemId) {
+    setPendingPhotoId({ sectionId, itemId });
+    fileInput.current?.click();
+  }
 
-    input.onchange = () => {
-      const file = input.files?.[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        updateSection(sectionKey, (tiles) =>
-          tiles.map((tile) =>
-            tile.id === id ? { ...tile, img: reader.result } : tile
-          )
-        );
-      };
-      reader.readAsDataURL(file);
+  function onPhoto(e) {
+    const file = e.target.files?.[0];
+    if (!file || !pendingPhotoId) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      updateSection(pendingPhotoId.sectionId, (arr) =>
+        arr.map((it) => it.id === pendingPhotoId.itemId ? { ...it, img: reader.result } : it)
+      );
+      setPendingPhotoId(null);
+      e.target.value = "";
     };
-
-    input.click();
+    reader.readAsDataURL(file);
   }
 
-  function pointerDown(e, section, tile) {
-    if (clean) return;
-    e.preventDefault();
-
-    const rect = sectionRefs.current[section.key].getBoundingClientRect();
+  function pointerDown(e, sectionId, item) {
+    e.stopPropagation();
+    setSelectedItem({ sectionId, itemId: item.id });
+    const wall = e.currentTarget.closest(".wall-canvas").getBoundingClientRect();
     drag.current = {
-      sectionKey: section.key,
-      id: tile.id,
-      dx: (e.clientX - rect.left) / SCALE - tile.x,
-      dy: (e.clientY - rect.top) / SCALE - tile.y,
+      sectionId,
+      itemId: item.id,
+      wall,
+      dx: e.clientX - (wall.left + (item.x / 100) * wall.width),
+      dy: e.clientY - (wall.top + (item.y / 100) * wall.height),
     };
-
-    showControls(section.key, tile.id);
+    window.addEventListener("pointermove", pointerMove);
+    window.addEventListener("pointerup", pointerUp, { once: true });
   }
 
-  function pointerMove(e, section) {
+  function pointerMove(e) {
+    if (!drag.current) return;
     const d = drag.current;
-    if (!d || d.sectionKey !== section.key) return;
-
-    const rect = sectionRefs.current[section.key].getBoundingClientRect();
-
-    updateSection(section.key, (tiles) =>
-      tiles.map((tile) => {
-        if (tile.id !== d.id) return tile;
-
-        const [w, h] = tileSize(tile);
-        const nx = (e.clientX - rect.left) / SCALE - d.dx;
-        const ny = (e.clientY - rect.top) / SCALE - d.dy;
-
-        return {
-          ...tile,
-          x: Math.max(
-            0,
-            Math.min(section.width - w, Math.round(nx))
-          ),
-          y: Math.max(
-            0,
-            Math.min(section.height - h, Math.round(ny))
-          ),
-        };
-      })
+    const x = Math.max(0, Math.min(100, ((e.clientX - d.wall.left - d.dx) / d.wall.width) * 100));
+    const y = Math.max(0, Math.min(100, ((e.clientY - d.wall.top - d.dy) / d.wall.height) * 100));
+    updateSection(d.sectionId, (arr) =>
+      arr.map((it) => it.id === d.itemId ? { ...it, x, y } : it)
     );
+  }
+
+  function pointerUp() {
+    drag.current = null;
+    window.removeEventListener("pointermove", pointerMove);
   }
 
   async function exportPNG() {
     setClean(true);
-    setSelected(null);
-    await new Promise((resolve) => setTimeout(resolve, 120));
-
-    const canvas = await html2canvas(themeRef.current, {
-      backgroundColor: "#0b0b0b",
+    setSelectedItem(null);
+    await new Promise((r) => setTimeout(r, 100));
+    const canvas = await html2canvas(exportRef.current, {
+      backgroundColor: "#090909",
       scale: 2,
       useCORS: true,
     });
-
-    const link = document.createElement("a");
-    link.download = `${themeKey}-theme-layout.png`;
-    link.href = canvas.toDataURL("image/png");
-    link.click();
-
+    const a = document.createElement("a");
+    a.download = `${themeKey}-theme.png`;
+    a.href = canvas.toDataURL("image/png");
+    a.click();
     setClean(false);
   }
 
   function backupJSON() {
-    const payload = {
-      version: 2,
-      theme: themeKey,
-      layouts,
-    };
-
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json",
-    });
-
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `${themeKey}-theme-backup.json`;
-    link.click();
-    URL.revokeObjectURL(link.href);
+    const blob = new Blob([JSON.stringify(items, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "exhibition-wall-planner-backup.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
   }
 
-  function restoreJSON() {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".json,application/json";
-
-    input.onchange = async () => {
+  function restoreJSON(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
       try {
-        const json = JSON.parse(await input.files[0].text());
-
-        if (json.layouts && typeof json.layouts === "object") {
-          setLayouts((current) => ({ ...current, ...json.layouts }));
-          return;
-        }
-
-        alert("This is not a Theme backup JSON.");
+        setItems(JSON.parse(reader.result));
       } catch {
-        alert("Invalid JSON backup.");
+        alert("That JSON backup could not be read.");
       }
     };
-
-    input.click();
+    reader.readAsText(file);
   }
 
-  const totalPhotos = theme.sections.reduce(
-    (sum, section) => sum + (layouts[section.key]?.length || 0),
-    0
-  );
-
   return (
-    <main>
+    <div className="app">
       <header>
         <div>
           <h1>Exhibition Wall Planner</h1>
-          <p>
-            Three exhibition themes · A0 / A1 / A2 · portrait + landscape ·
-            autosaved
-          </p>
+          <p>Three exhibition themes · A0 / A1 / A2 · portrait + landscape · autosaved</p>
         </div>
-
-        <select
-          value={themeKey}
-          onChange={(e) => setThemeKey(e.target.value)}
-        >
-          {Object.entries(THEMES).map(([key, item]) => (
-            <option value={key} key={key}>
-              {item.label}
-            </option>
-          ))}
+        <select value={themeKey} onChange={(e) => setThemeKey(e.target.value)}>
+          <option value="wall1">Wall 1 — Theme 1</option>
+          <option value="wall2">Wall 2 — Theme 2</option>
+          <option value="wall3">Wall 3 — Theme 3</option>
         </select>
       </header>
 
-      <section className="toolbar">
-        <div>
-          {Object.keys(PAPER).map((size) => (
-            <button key={size} onClick={() => addFrame(size)}>
-              Add {size}
-            </button>
-          ))}
+      <div className="toolbar">
+        <div className="add-tools">
+          <div className="destination">
+            Adding to: <strong>{activeSection.title}</strong> · {activeSection.length} m
+          </div>
+          <div className="buttons">
+            <button onClick={() => addFrame("A0")}>Add A0</button>
+            <button onClick={() => addFrame("A1")}>Add A1</button>
+            <button onClick={() => addFrame("A2")}>Add A2</button>
+          </div>
         </div>
-
-        <div>
-          <button onClick={() => setClean((v) => !v)}>
-            {clean ? "Edit" : "Clean preview"}
+        <div className="buttons">
+          <button onClick={() => { setClean((v) => !v); setSelectedItem(null); }}>
+            {clean ? "Edit preview" : "Clean preview"}
           </button>
           <button onClick={exportPNG}>Export Theme PNG</button>
           <button onClick={backupJSON}>Backup Theme JSON</button>
-          <button onClick={restoreJSON}>Restore JSON</button>
+          <label className="button-label">
+            Restore JSON
+            <input type="file" accept=".json,application/json" onChange={restoreJSON} hidden />
+          </label>
         </div>
-      </section>
-
-      <div className="themeMeta">
-        <div>
-          <strong>{theme.label}</strong>
-          <span>
-            {theme.sections.length === 2
-              ? "Two physical sections shown together"
-              : "One physical section"}
-          </span>
-        </div>
-        <b>{totalPhotos} photographs</b>
       </div>
 
-      <div className="themeCapture" ref={themeRef}>
-        {theme.sections.map((section, index) => {
-          const tiles = layouts[section.key] || [];
+      <input ref={fileInput} type="file" accept="image/*" onChange={onPhoto} hidden />
 
+      <main ref={exportRef}>
+        <div className="theme-heading">
+          <strong>{theme.title}</strong>
+          {theme.sections.length > 1 && <span>Two physical sections shown together</span>}
+        </div>
+
+        {theme.sections.map((section) => {
+          const selected = selectedSection === section.id;
           return (
-            <section className="wallGroup" key={section.key}>
-              <div className="wallHeading">
-                <strong>
-                  {theme.label} · Section {index + 1}
-                </strong>
-                <span>{section.label}</span>
-                <span>{tiles.length} photographs</span>
+            <section className={`section ${selected ? "selected-section" : ""}`} key={section.id}>
+              <div className="section-title">
+                <strong>{section.title}</strong>
+                <span>{section.length} m × {section.height.toFixed(2)} m</span>
               </div>
 
-              <div className="wallScroll">
+              <div
+                className="wall-shell"
+                onClick={() => {
+                  setSelectedSection(section.id);
+                  setSelectedItem(null);
+                }}
+              >
+                {!clean && selected && <div className="selected-badge">SELECTED — ADDING HERE</div>}
                 <div
-                  className="wall"
-                  ref={(node) => {
-                    sectionRefs.current[section.key] = node;
-                  }}
-                  style={{
-                    width: section.width * SCALE,
-                    height: section.height * SCALE,
-                  }}
-                  onMouseMove={(e) => pointerMove(e, section)}
-                  onMouseUp={() => {
-                    drag.current = null;
-                  }}
-                  onMouseLeave={() => {
-                    drag.current = null;
-                  }}
+                  className="wall-canvas"
+                  style={{ aspectRatio: `${section.length} / ${section.height}` }}
                 >
-                  <div className="eyeLine" />
-
-                  {tiles.map((tile) => {
-                    const [w, h] = tileSize(tile);
-                    const token = `${section.key}:${tile.id}`;
+                  <div className="centre-line" />
+                  {sectionItems(section.id).map((it) => {
+                    const wPct = (it.wCm / (section.length * 100)) * 100;
+                    const hPct = (it.hCm / (section.height * 100)) * 100;
+                    const isSelected =
+                      selectedItem?.sectionId === section.id && selectedItem?.itemId === it.id;
 
                     return (
                       <div
-                        key={tile.id}
-                        className={
-                          "tile " + (selected === token ? "selected" : "")
-                        }
+                        key={it.id}
+                        className={`frame ${isSelected ? "frame-selected" : ""}`}
                         style={{
-                          left: tile.x * SCALE,
-                          top: tile.y * SCALE,
-                          width: w * SCALE,
-                          height: h * SCALE,
-                          backgroundImage: tile.img
-                            ? `url("${tile.img}")`
-                            : "none",
+                          left: `${it.x}%`,
+                          top: `${it.y}%`,
+                          width: `${wPct}%`,
+                          height: `${hPct}%`,
                         }}
-                        onMouseDown={(e) =>
-                          pointerDown(e, section, tile)
-                        }
-                        onClick={() =>
-                          showControls(section.key, tile.id)
-                        }
-                        onDoubleClick={() =>
-                          choosePhoto(section.key, tile.id)
-                        }
+                        onPointerDown={(e) => pointerDown(e, section.id, it)}
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          choosePhoto(section.id, it.id);
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedItem({ sectionId: section.id, itemId: it.id });
+                        }}
                       >
-                        {!tile.img && (
-                          <span>
-                            {tile.size}
-                            <small>
-                              {tile.orientation === "P"
-                                ? "portrait"
-                                : "landscape"}
-                            </small>
-                          </span>
+                        {it.img ? (
+                          <img src={it.img} alt="" draggable="false" />
+                        ) : (
+                          <div className="placeholder">
+                            <b>{it.size}</b>
+                            <small>{it.rotated ? "landscape" : "portrait"}</small>
+                          </div>
                         )}
 
-                        {!clean && selected === token && (
-                          <div
-                            className="actions"
-                            onMouseDown={(e) => e.stopPropagation()}
-                          >
-                            <button
-                              onClick={() =>
-                                choosePhoto(section.key, tile.id)
-                              }
-                            >
-                              {tile.img ? "Replace" : "Photo"}
-                            </button>
-                            <button
-                              onClick={() =>
-                                rotate(section.key, tile.id)
-                              }
-                            >
-                              Rotate
-                            </button>
-                            <button
-                              className="danger"
-                              onClick={() =>
-                                remove(section.key, tile.id)
-                              }
-                            >
-                              Delete
-                            </button>
+                        {!clean && isSelected && (
+                          <div className="item-controls">
+                            <button onPointerDown={(e) => e.stopPropagation()} onClick={(e) => {
+                              e.stopPropagation(); rotateItem(section.id, it.id);
+                            }}>Rotate</button>
+                            <button onPointerDown={(e) => e.stopPropagation()} onClick={(e) => {
+                              e.stopPropagation(); choosePhoto(section.id, it.id);
+                            }}>Photo</button>
+                            <button className="danger" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => {
+                              e.stopPropagation(); deleteItem(section.id, it.id);
+                            }}>Delete</button>
                           </div>
                         )}
                       </div>
@@ -465,12 +325,11 @@ export default function App() {
             </section>
           );
         })}
-      </div>
+      </main>
 
-      <footer>
-        Add frames randomly to the current theme · double-click a frame to add
-        or replace a photograph · drag to position · click for controls
-      </footer>
-    </main>
+      <p className="hint">
+        Click a wall section to choose where new frames go · double-click a frame to add/replace its photograph · drag to position
+      </p>
+    </div>
   );
 }
