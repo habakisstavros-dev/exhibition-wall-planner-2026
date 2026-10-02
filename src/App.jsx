@@ -1,335 +1,181 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import html2canvas from "html2canvas";
+import React, { useEffect, useMemo, useState } from "react";
 import "./styles.css";
 
-const PAPER = {
-  A0: { w: 84.1, h: 118.9 },
-  A1: { w: 59.4, h: 84.1 },
-  A2: { w: 42.0, h: 59.4 },
+const WALLS = [
+  { id: "w1a", theme: "Wall 1 — Theme 1", section: "Section 1", width: 22, height: 2.4 },
+  { id: "w1b", theme: "Wall 1 — Theme 1", section: "Section 2", width: 15.7, height: 2.4 },
+  { id: "w2a", theme: "Wall 2 — Theme 2", section: "Section 1", width: 15.7, height: 2.4 },
+  { id: "w2b", theme: "Wall 2 — Theme 2", section: "Section 2", width: 9.4, height: 2.4 },
+  { id: "w3", theme: "Wall 3 — Theme 3", section: "Section 1", width: 9.4, height: 2.4 },
+];
+
+const SIZES = {
+  A0: { portrait: [0.841, 1.189], landscape: [1.189, 0.841] },
+  A1: { portrait: [0.594, 0.841], landscape: [0.841, 0.594] },
+  A2: { portrait: [0.420, 0.594], landscape: [0.594, 0.420] },
 };
 
-const THEMES = {
-  wall1: {
-    title: "Wall 1 — Theme 1",
-    sections: [
-      { id: "wall1a", title: "Wall 1 — Theme 1 · Section 1", length: 22, height: 2.4 },
-      { id: "wall1b", title: "Wall 1 — Theme 1 · Section 2", length: 15.7, height: 2.4 },
-    ],
-  },
-  wall2: {
-    title: "Wall 2 — Theme 2",
-    sections: [
-      { id: "wall2a", title: "Wall 2 — Theme 2 · Section 1", length: 15.7, height: 2.4 },
-      { id: "wall2b", title: "Wall 2 — Theme 2 · Section 2", length: 9.4, height: 2.4 },
-    ],
-  },
-  wall3: {
-    title: "Wall 3 — Theme 3",
-    sections: [
-      { id: "wall3a", title: "Wall 3 — Theme 3", length: 9.4, height: 2.4 },
-    ],
-  },
-};
+const key = "exhibition-wall-planner-2026-centered-v1";
+const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
-const STORAGE_KEY = "exhibition-wall-planner-2026-v3";
-const uid = () => Math.random().toString(36).slice(2, 10);
-
-function loadSaved() {
+function load() {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
-  } catch {
-    return {};
-  }
+    const v = JSON.parse(localStorage.getItem(key));
+    if (v && typeof v === "object") return v;
+  } catch {}
+  return Object.fromEntries(WALLS.map(w => [w.id, []]));
 }
 
 export default function App() {
-  const [themeKey, setThemeKey] = useState("wall1");
-  const [selectedSection, setSelectedSection] = useState("wall1a");
-  const [items, setItems] = useState(loadSaved);
+  const [items, setItems] = useState(load);
+  const [selectedWall, setSelectedWall] = useState("w1a");
   const [selectedItem, setSelectedItem] = useState(null);
-  const [clean, setClean] = useState(false);
-  const [pendingPhotoId, setPendingPhotoId] = useState(null);
-  const fileInput = useRef(null);
-  const exportRef = useRef(null);
-  const drag = useRef(null);
 
-  const theme = THEMES[themeKey];
-  const activeSection = useMemo(
-    () => theme.sections.find((s) => s.id === selectedSection) || theme.sections[0],
-    [theme, selectedSection]
-  );
+  useEffect(() => localStorage.setItem(key, JSON.stringify(items)), [items]);
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-  }, [items]);
+  const selectedWallData = WALLS.find(w => w.id === selectedWall);
 
-  useEffect(() => {
-    if (!theme.sections.some((s) => s.id === selectedSection)) {
-      setSelectedSection(theme.sections[0].id);
-    }
-    setSelectedItem(null);
-  }, [themeKey]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const sectionItems = (id) => items[id] || [];
-
-  function updateSection(id, updater) {
-    setItems((prev) => ({ ...prev, [id]: updater(prev[id] || []) }));
-  }
-
-  function addFrame(size) {
-    const section = activeSection;
-    const existing = sectionItems(section.id);
-    const base = PAPER[size];
-    const portrait = existing.length % 2 === 0;
-    const wCm = portrait ? base.w : base.h;
-    const hCm = portrait ? base.h : base.w;
-
-    const next = {
-      id: uid(),
-      size,
-      rotated: !portrait,
-      x: Math.min(88, 3 + (existing.length * 8) % 82),
-      y: 50,
-      wCm,
-      hCm,
-      img: null,
-    };
-    updateSection(section.id, (arr) => [...arr, next]);
-    setSelectedItem({ sectionId: section.id, itemId: next.id });
-  }
-
-  function rotateItem(sectionId, itemId) {
-    updateSection(sectionId, (arr) =>
-      arr.map((it) =>
-        it.id === itemId
-          ? { ...it, rotated: !it.rotated, wCm: it.hCm, hCm: it.wCm }
-          : it
-      )
+  function add(size) {
+    const wall = selectedWallData;
+    if (!wall) return;
+    const existing = items[wall.id] || [];
+    const dims = SIZES[size].portrait;
+    const x = Math.min(
+      Math.max(0.15, existing.length ? Math.max(...existing.map(i => i.x + i.w)) + 0.25 : 0.35),
+      Math.max(0.15, wall.width - dims[0] - 0.15)
     );
+    const item = { id: uid(), size, orientation: "portrait", x, w: dims[0], h: dims[1], image: null };
+    setItems(s => ({ ...s, [wall.id]: [...(s[wall.id] || []), item] }));
+    setSelectedItem(item.id);
   }
 
-  function deleteItem(sectionId, itemId) {
-    updateSection(sectionId, (arr) => arr.filter((it) => it.id !== itemId));
+  function update(wallId, id, patch) {
+    setItems(s => ({ ...s, [wallId]: (s[wallId] || []).map(i => i.id === id ? { ...i, ...patch } : i) }));
+  }
+
+  function rotate(wallId, item) {
+    const orientation = item.orientation === "portrait" ? "landscape" : "portrait";
+    const [w, h] = SIZES[item.size][orientation];
+    const wall = WALLS.find(x => x.id === wallId);
+    update(wallId, item.id, { orientation, w, h, x: Math.min(item.x, wall.width - w) });
+  }
+
+  function remove(wallId, id) {
+    setItems(s => ({ ...s, [wallId]: (s[wallId] || []).filter(i => i.id !== id) }));
     setSelectedItem(null);
   }
 
-  function choosePhoto(sectionId, itemId) {
-    setPendingPhotoId({ sectionId, itemId });
-    fileInput.current?.click();
-  }
-
-  function onPhoto(e) {
-    const file = e.target.files?.[0];
-    if (!file || !pendingPhotoId) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      updateSection(pendingPhotoId.sectionId, (arr) =>
-        arr.map((it) => it.id === pendingPhotoId.itemId ? { ...it, img: reader.result } : it)
-      );
-      setPendingPhotoId(null);
-      e.target.value = "";
-    };
-    reader.readAsDataURL(file);
-  }
-
-  function pointerDown(e, sectionId, item) {
-    e.stopPropagation();
-    setSelectedItem({ sectionId, itemId: item.id });
-    const wall = e.currentTarget.closest(".wall-canvas").getBoundingClientRect();
-    drag.current = {
-      sectionId,
-      itemId: item.id,
-      wall,
-      dx: e.clientX - (wall.left + (item.x / 100) * wall.width),
-      dy: e.clientY - (wall.top + (item.y / 100) * wall.height),
-    };
-    window.addEventListener("pointermove", pointerMove);
-    window.addEventListener("pointerup", pointerUp, { once: true });
-  }
-
-  function pointerMove(e) {
-    if (!drag.current) return;
-    const d = drag.current;
-    const x = Math.max(0, Math.min(100, ((e.clientX - d.wall.left - d.dx) / d.wall.width) * 100));
-    const y = Math.max(0, Math.min(100, ((e.clientY - d.wall.top - d.dy) / d.wall.height) * 100));
-    updateSection(d.sectionId, (arr) =>
-      arr.map((it) => it.id === d.itemId ? { ...it, x, y } : it)
-    );
-  }
-
-  function pointerUp() {
-    drag.current = null;
-    window.removeEventListener("pointermove", pointerMove);
-  }
-
-  async function exportPNG() {
-    setClean(true);
-    setSelectedItem(null);
-    await new Promise((r) => setTimeout(r, 100));
-    const canvas = await html2canvas(exportRef.current, {
-      backgroundColor: "#090909",
-      scale: 2,
-      useCORS: true,
-    });
-    const a = document.createElement("a");
-    a.download = `${themeKey}-theme.png`;
-    a.href = canvas.toDataURL("image/png");
-    a.click();
-    setClean(false);
-  }
-
-  function backupJSON() {
-    const blob = new Blob([JSON.stringify(items, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "exhibition-wall-planner-backup.json";
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }
-
-  function restoreJSON(e) {
-    const file = e.target.files?.[0];
+  function photo(wallId, item, file) {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        setItems(JSON.parse(reader.result));
-      } catch {
-        alert("That JSON backup could not be read.");
-      }
-    };
-    reader.readAsText(file);
+    const r = new FileReader();
+    r.onload = () => update(wallId, item.id, { image: r.result });
+    r.readAsDataURL(file);
   }
+
+  function dragStart(e, wall, item) {
+    e.stopPropagation();
+    setSelectedWall(wall.id);
+    setSelectedItem(item.id);
+    const rect = e.currentTarget.parentElement.getBoundingClientRect();
+    const startX = e.clientX;
+    const start = item.x;
+    const move = ev => {
+      const dxM = ((ev.clientX - startX) / rect.width) * wall.width;
+      update(wall.id, item.id, { x: Math.max(0, Math.min(wall.width - item.w, start + dxM)) });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
+  function clean() {
+    if (!confirm("Clear all frames from all five wall sections?")) return;
+    setItems(Object.fromEntries(WALLS.map(w => [w.id, []])));
+  }
+
+  const groups = useMemo(() => [
+    { title: "Wall 1 — Theme 1", walls: WALLS.slice(0,2) },
+    { title: "Wall 2 — Theme 2", walls: WALLS.slice(2,4) },
+    { title: "Wall 3 — Theme 3", walls: WALLS.slice(4,5) },
+  ], []);
 
   return (
-    <div className="app">
+    <main>
       <header>
-        <div>
-          <h1>Exhibition Wall Planner</h1>
-          <p>Three exhibition themes · A0 / A1 / A2 · portrait + landscape · autosaved</p>
-        </div>
-        <select value={themeKey} onChange={(e) => setThemeKey(e.target.value)}>
-          <option value="wall1">Wall 1 — Theme 1</option>
-          <option value="wall2">Wall 2 — Theme 2</option>
-          <option value="wall3">Wall 3 — Theme 3</option>
-        </select>
+        <h1>Exhibition Wall Planner</h1>
+        <p>Three exhibition themes · A0 / A1 / A2 · portrait + landscape · single-line centred hanging · autosaved</p>
       </header>
 
       <div className="toolbar">
-        <div className="add-tools">
-          <div className="destination">
-            Adding to: <strong>{activeSection.title}</strong> · {activeSection.length} m
-          </div>
-          <div className="buttons">
-            <button onClick={() => addFrame("A0")}>Add A0</button>
-            <button onClick={() => addFrame("A1")}>Add A1</button>
-            <button onClick={() => addFrame("A2")}>Add A2</button>
-          </div>
+        <div className="adders">
+          <button onClick={() => add("A0")}>Add A0</button>
+          <button onClick={() => add("A1")}>Add A1</button>
+          <button onClick={() => add("A2")}>Add A2</button>
         </div>
-        <div className="buttons">
-          <button onClick={() => { setClean((v) => !v); setSelectedItem(null); }}>
-            {clean ? "Edit preview" : "Clean preview"}
-          </button>
-          <button onClick={exportPNG}>Export Theme PNG</button>
-          <button onClick={backupJSON}>Backup Theme JSON</button>
-          <label className="button-label">
-            Restore JSON
-            <input type="file" accept=".json,application/json" onChange={restoreJSON} hidden />
-          </label>
+        <div className="destination">
+          Adding to: <strong>{selectedWallData?.theme} · {selectedWallData?.section} · {selectedWallData?.width} m</strong>
         </div>
+        <button onClick={clean}>Clean preview</button>
       </div>
 
-      <input ref={fileInput} type="file" accept="image/*" onChange={onPhoto} hidden />
+      {groups.map(group => (
+        <section className="theme" key={group.title}>
+          <div className="themeTitle">
+            <h2>{group.title}</h2>
+            <span>{group.walls.length === 2 ? "Two physical sections shown together" : "One physical section"}</span>
+          </div>
 
-      <main ref={exportRef}>
-        <div className="theme-heading">
-          <strong>{theme.title}</strong>
-          {theme.sections.length > 1 && <span>Two physical sections shown together</span>}
-        </div>
-
-        {theme.sections.map((section) => {
-          const selected = selectedSection === section.id;
-          return (
-            <section className={`section ${selected ? "selected-section" : ""}`} key={section.id}>
-              <div className="section-title">
-                <strong>{section.title}</strong>
-                <span>{section.length} m × {section.height.toFixed(2)} m</span>
+          {group.walls.map(wall => (
+            <div
+              className={"wallBlock " + (selectedWall === wall.id ? "selectedWall" : "")}
+              key={wall.id}
+              onClick={() => { setSelectedWall(wall.id); setSelectedItem(null); }}
+            >
+              <div className="wallHeading">
+                <h3>{wall.theme} · {wall.section}</h3>
+                <span>{wall.width} m × {wall.height.toFixed(2)} m</span>
               </div>
+              {selectedWall === wall.id && <div className="selectedBadge">SELECTED — ADDING HERE</div>}
 
-              <div
-                className="wall-shell"
-                onClick={() => {
-                  setSelectedSection(section.id);
-                  setSelectedItem(null);
-                }}
-              >
-                {!clean && selected && <div className="selected-badge">SELECTED — ADDING HERE</div>}
-                <div
-                  className="wall-canvas"
-                  style={{ aspectRatio: `${section.length} / ${section.height}` }}
-                >
-                  <div className="centre-line" />
-                  {sectionItems(section.id).map((it) => {
-                    const wPct = (it.wCm / (section.length * 100)) * 100;
-                    const hPct = (it.hCm / (section.height * 100)) * 100;
-                    const isSelected =
-                      selectedItem?.sectionId === section.id && selectedItem?.itemId === it.id;
-
-                    return (
-                      <div
-                        key={it.id}
-                        className={`frame ${isSelected ? "frame-selected" : ""}`}
-                        style={{
-                          left: `${it.x}%`,
-                          top: `${it.y}%`,
-                          width: `${wPct}%`,
-                          height: `${hPct}%`,
-                        }}
-                        onPointerDown={(e) => pointerDown(e, section.id, it)}
-                        onDoubleClick={(e) => {
-                          e.stopPropagation();
-                          choosePhoto(section.id, it.id);
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedItem({ sectionId: section.id, itemId: it.id });
-                        }}
-                      >
-                        {it.img ? (
-                          <img src={it.img} alt="" draggable="false" />
-                        ) : (
-                          <div className="placeholder">
-                            <b>{it.size}</b>
-                            <small>{it.rotated ? "landscape" : "portrait"}</small>
-                          </div>
-                        )}
-
-                        {!clean && isSelected && (
-                          <div className="item-controls">
-                            <button onPointerDown={(e) => e.stopPropagation()} onClick={(e) => {
-                              e.stopPropagation(); rotateItem(section.id, it.id);
-                            }}>Rotate</button>
-                            <button onPointerDown={(e) => e.stopPropagation()} onClick={(e) => {
-                              e.stopPropagation(); choosePhoto(section.id, it.id);
-                            }}>Photo</button>
-                            <button className="danger" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => {
-                              e.stopPropagation(); deleteItem(section.id, it.id);
-                            }}>Delete</button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+              <div className="wall">
+                <div className="centerline" />
+                {(items[wall.id] || []).map(item => {
+                  const left = (item.x / wall.width) * 100;
+                  const width = (item.w / wall.width) * 100;
+                  const height = (item.h / wall.height) * 100;
+                  const chosen = selectedItem === item.id && selectedWall === wall.id;
+                  return (
+                    <div
+                      key={item.id}
+                      className={"frame " + (chosen ? "chosen" : "")}
+                      style={{ left: `${left}%`, width: `${width}%`, height: `${height}%` }}
+                      onPointerDown={e => dragStart(e, wall, item)}
+                      onDoubleClick={e => {
+                        e.stopPropagation();
+                        e.currentTarget.querySelector("input").click();
+                      }}
+                    >
+                      {item.image ? <img src={item.image} alt="" /> : <div className="placeholder"><b>{item.size}</b><small>{item.orientation}</small></div>}
+                      <input type="file" accept="image/*" hidden onChange={e => photo(wall.id, item, e.target.files?.[0])} />
+                      {chosen && (
+                        <div className="controls" onPointerDown={e => e.stopPropagation()}>
+                          <button onClick={() => rotate(wall.id, item)}>Rotate</button>
+                          <button onClick={e => e.currentTarget.parentElement.parentElement.querySelector("input").click()}>Photo</button>
+                          <button onClick={() => remove(wall.id, item.id)}>Delete</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            </section>
-          );
-        })}
-      </main>
-
-      <p className="hint">
-        Click a wall section to choose where new frames go · double-click a frame to add/replace its photograph · drag to position
-      </p>
-    </div>
+              <div className="wallHint">Drag left/right only · every frame stays centred on the same hanging line</div>
+            </div>
+          ))}
+        </section>
+      ))}
+    </main>
   );
 }
