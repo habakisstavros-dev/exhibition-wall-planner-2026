@@ -1,20 +1,476 @@
-import React,{useEffect,useRef,useState}from"react";import html2canvas from"html2canvas";
-const S=.5,P={A0:[84.1,118.9],A1:[59.4,84.1],A2:[42,59.4]},W={w1a:["Wall 1 — 22 m",2200,240],w1b:["Wall 1 — 15.7 m",1570,240],w2a:["Wall 2 — 15.7 m",1570,240],w2b:["Wall 2 — 9.4 m",940,240],w3:["Wall 3 — 9.4 m",940,240]};
-const id=()=>crypto.randomUUID?.()||Math.random().toString(36).slice(2);
-function db(){return new Promise((ok,no)=>{let r=indexedDB.open("wall-planner",1);r.onupgradeneeded=()=>r.result.createObjectStore("walls");r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)})}
-async function get(k){let d=await db();return new Promise((ok,no)=>{let r=d.transaction("walls").objectStore("walls").get(k);r.onsuccess=()=>ok(r.result||[]);r.onerror=()=>no(r.error)})}
-async function put(k,v){let d=await db();return new Promise((ok,no)=>{let t=d.transaction("walls","readwrite");t.objectStore("walls").put(v,k);t.oncomplete=ok;t.onerror=()=>no(t.error)})}
-export default function App(){const[k,setK]=useState("w1a"),[tiles,setTiles]=useState([]),[ready,setReady]=useState(false),[sel,setSel]=useState(null),[clean,setClean]=useState(false);const ref=useRef(),drag=useRef(),timer=useRef();const wall=W[k];
-useEffect(()=>{setReady(false);get(k).then(x=>{setTiles(x);setReady(true)})},[k]);useEffect(()=>{if(ready)put(k,tiles)},[tiles,k,ready]);
-const size=t=>{let[a,b]=P[t.s];return t.o==="P"?[a,b]:[b,a]};const controls=x=>{setSel(x);clearTimeout(timer.current);timer.current=setTimeout(()=>setSel(null),3500)};
-function add(s){let[a,b]=P[s],o=Math.random()>.45?"P":"L",[ww,hh]=o==="P"?[a,b]:[b,a];setTiles(x=>[...x,{id:id(),s,o,x:Math.random()*(wall[1]-ww),y:Math.random()*(wall[2]-hh)}])}
-function rotate(i){setTiles(x=>x.map(t=>t.id===i?{...t,o:t.o==="P"?"L":"P"}:t));controls(i)}function del(i){setTiles(x=>x.filter(t=>t.id!==i));setSel(null)}
-function photo(i){let n=document.createElement("input");n.type="file";n.accept="image/*";n.onchange=()=>{let f=n.files?.[0];if(!f)return;let r=new FileReader;r.onload=()=>setTiles(x=>x.map(t=>t.id===i?{...t,img:r.result}:t));r.readAsDataURL(f)};n.click()}
-function down(e,t){if(clean)return;e.preventDefault();controls(t.id);let r=ref.current.getBoundingClientRect();drag.current={id:t.id,dx:(e.clientX-r.left)/S-t.x,dy:(e.clientY-r.top)/S-t.y}}
-function move(e){if(!drag.current)return;let r=ref.current.getBoundingClientRect(),d=drag.current;setTiles(x=>x.map(t=>{if(t.id!==d.id)return t;let[w,h]=size(t),nx=(e.clientX-r.left)/S-d.dx,ny=(e.clientY-r.top)/S-d.dy;return{...t,x:Math.max(0,Math.min(wall[1]-w,Math.round(nx))),y:Math.max(0,Math.min(wall[2]-h,Math.round(ny)))}}))}
-async function png(){setClean(true);setSel(null);await new Promise(r=>setTimeout(r,80));let c=await html2canvas(ref.current,{backgroundColor:"#fff",scale:2}),a=document.createElement("a");a.download=wall[0].replaceAll(" ","_")+".png";a.href=c.toDataURL("image/png");a.click();setClean(false)}
-function backup(){let b=new Blob([JSON.stringify({version:1,wall:k,tiles},null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=k+"-backup.json";a.click();URL.revokeObjectURL(a.href)}
-function restore(){let n=document.createElement("input");n.type="file";n.accept=".json";n.onchange=async()=>{try{let j=JSON.parse(await n.files[0].text()),x=Array.isArray(j)?j:j.tiles;if(!Array.isArray(x))throw 0;setTiles(x)}catch{alert("Invalid wall backup")}};n.click()}
-return <main><header><div><h1>Exhibition Wall Planner</h1><p>A0 / A1 / A2 · portrait + landscape · autosaved in this browser</p></div><select value={k} onChange={e=>setK(e.target.value)}>{Object.entries(W).map(([x,w])=><option value={x} key={x}>{w[0]} × 2.40 m</option>)}</select></header>
-<section className="bar"><div>{Object.keys(P).map(s=><button key={s} onClick={()=>add(s)}>Add {s}</button>)}</div><div><button onClick={()=>setClean(!clean)}>{clean?"Edit":"Clean preview"}</button><button onClick={png}>Export PNG</button><button onClick={backup}>Backup JSON</button><button onClick={restore}>Restore JSON</button></div></section>
-<div className="meta"><b>{wall[0]}</b> · {(wall[1]/100).toFixed(1)} × 2.40 m <span>{tiles.length} photographs</span></div><div className="scroll"><div ref={ref} className="wall" style={{width:wall[1]*S,height:wall[2]*S}} onMouseMove={move} onMouseUp={()=>drag.current=null} onMouseLeave={()=>drag.current=null}><div className="eye"/>{tiles.map(t=>{let[w,h]=size(t);return <div key={t.id} className={"tile "+(sel===t.id?"selected":"")} style={{left:t.x*S,top:t.y*S,width:w*S,height:h*S,backgroundImage:t.img?`url("${t.img}")`:"none"}} onMouseDown={e=>down(e,t)} onClick={()=>controls(t.id)} onDoubleClick={()=>photo(t.id)}>{!t.img&&<span>{t.s}<small>{t.o==="P"?"portrait":"landscape"}</small></span>}{!clean&&sel===t.id&&<div className="actions" onMouseDown={e=>e.stopPropagation()}><button onClick={()=>photo(t.id)}>{t.img?"Replace":"Photo"}</button><button onClick={()=>rotate(t.id)}>Rotate</button><button className="danger" onClick={()=>del(t.id)}>Delete</button></div>}</div>})}</div></div><footer>Double-click a frame to add/replace a photograph · click for controls · drag to position</footer></main>}
+import React, { useEffect, useRef, useState } from "react";
+import html2canvas from "html2canvas";
+
+const SCALE = 0.5;
+
+const PAPER = {
+  A0: [84.1, 118.9],
+  A1: [59.4, 84.1],
+  A2: [42.0, 59.4],
+};
+
+const THEMES = {
+  wall1: {
+    label: "Wall 1 — Theme 1",
+    sections: [
+      { key: "w1a", label: "22 m × 2.40 m", width: 2200, height: 240 },
+      { key: "w1b", label: "15.7 m × 2.40 m", width: 1570, height: 240 },
+    ],
+  },
+  wall2: {
+    label: "Wall 2 — Theme 2",
+    sections: [
+      { key: "w2a", label: "15.7 m × 2.40 m", width: 1570, height: 240 },
+      { key: "w2b", label: "9.4 m × 2.40 m", width: 940, height: 240 },
+    ],
+  },
+  wall3: {
+    label: "Wall 3 — Theme 3",
+    sections: [
+      { key: "w3", label: "9.4 m × 2.40 m", width: 940, height: 240 },
+    ],
+  },
+};
+
+const uid = () =>
+  crypto.randomUUID?.() || Math.random().toString(36).slice(2);
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("wall-planner", 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains("walls")) {
+        req.result.createObjectStore("walls");
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbGet(key) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction("walls").objectStore("walls").get(key);
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbPut(key, value) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("walls", "readwrite");
+    tx.objectStore("walls").put(value, key);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function tileSize(tile) {
+  const [a, b] = PAPER[tile.size];
+  return tile.orientation === "P" ? [a, b] : [b, a];
+}
+
+export default function App() {
+  const [themeKey, setThemeKey] = useState("wall1");
+  const [layouts, setLayouts] = useState({});
+  const [ready, setReady] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const [clean, setClean] = useState(false);
+
+  const themeRef = useRef(null);
+  const sectionRefs = useRef({});
+  const drag = useRef(null);
+  const timer = useRef(null);
+
+  const theme = THEMES[themeKey];
+
+  useEffect(() => {
+    let cancelled = false;
+    setReady(false);
+
+    Promise.all(
+      theme.sections.map(async (section) => [
+        section.key,
+        await dbGet(section.key),
+      ])
+    ).then((entries) => {
+      if (cancelled) return;
+      setLayouts(Object.fromEntries(entries));
+      setReady(true);
+      setSelected(null);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [themeKey]);
+
+  useEffect(() => {
+    if (!ready) return;
+    theme.sections.forEach((section) => {
+      dbPut(section.key, layouts[section.key] || []);
+    });
+  }, [layouts, ready, theme]);
+
+  function showControls(sectionKey, id) {
+    const token = `${sectionKey}:${id}`;
+    setSelected(token);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setSelected(null), 3500);
+  }
+
+  function updateSection(sectionKey, updater) {
+    setLayouts((current) => ({
+      ...current,
+      [sectionKey]: updater(current[sectionKey] || []),
+    }));
+  }
+
+  function addFrame(size) {
+    const sections = theme.sections;
+    const section = sections[Math.floor(Math.random() * sections.length)];
+    const orientation = Math.random() > 0.45 ? "P" : "L";
+    const [a, b] = PAPER[size];
+    const [w, h] = orientation === "P" ? [a, b] : [b, a];
+
+    updateSection(section.key, (tiles) => [
+      ...tiles,
+      {
+        id: uid(),
+        size,
+        orientation,
+        x: Math.max(0, Math.random() * (section.width - w)),
+        y: Math.max(0, Math.random() * (section.height - h)),
+      },
+    ]);
+  }
+
+  function rotate(sectionKey, id) {
+    updateSection(sectionKey, (tiles) =>
+      tiles.map((tile) =>
+        tile.id === id
+          ? {
+              ...tile,
+              orientation: tile.orientation === "P" ? "L" : "P",
+            }
+          : tile
+      )
+    );
+    showControls(sectionKey, id);
+  }
+
+  function remove(sectionKey, id) {
+    updateSection(sectionKey, (tiles) =>
+      tiles.filter((tile) => tile.id !== id)
+    );
+    setSelected(null);
+  }
+
+  function choosePhoto(sectionKey, id) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        updateSection(sectionKey, (tiles) =>
+          tiles.map((tile) =>
+            tile.id === id ? { ...tile, img: reader.result } : tile
+          )
+        );
+      };
+      reader.readAsDataURL(file);
+    };
+
+    input.click();
+  }
+
+  function pointerDown(e, section, tile) {
+    if (clean) return;
+    e.preventDefault();
+
+    const rect = sectionRefs.current[section.key].getBoundingClientRect();
+    drag.current = {
+      sectionKey: section.key,
+      id: tile.id,
+      dx: (e.clientX - rect.left) / SCALE - tile.x,
+      dy: (e.clientY - rect.top) / SCALE - tile.y,
+    };
+
+    showControls(section.key, tile.id);
+  }
+
+  function pointerMove(e, section) {
+    const d = drag.current;
+    if (!d || d.sectionKey !== section.key) return;
+
+    const rect = sectionRefs.current[section.key].getBoundingClientRect();
+
+    updateSection(section.key, (tiles) =>
+      tiles.map((tile) => {
+        if (tile.id !== d.id) return tile;
+
+        const [w, h] = tileSize(tile);
+        const nx = (e.clientX - rect.left) / SCALE - d.dx;
+        const ny = (e.clientY - rect.top) / SCALE - d.dy;
+
+        return {
+          ...tile,
+          x: Math.max(
+            0,
+            Math.min(section.width - w, Math.round(nx))
+          ),
+          y: Math.max(
+            0,
+            Math.min(section.height - h, Math.round(ny))
+          ),
+        };
+      })
+    );
+  }
+
+  async function exportPNG() {
+    setClean(true);
+    setSelected(null);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    const canvas = await html2canvas(themeRef.current, {
+      backgroundColor: "#0b0b0b",
+      scale: 2,
+      useCORS: true,
+    });
+
+    const link = document.createElement("a");
+    link.download = `${themeKey}-theme-layout.png`;
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+
+    setClean(false);
+  }
+
+  function backupJSON() {
+    const payload = {
+      version: 2,
+      theme: themeKey,
+      layouts,
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${themeKey}-theme-backup.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
+
+  function restoreJSON() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,application/json";
+
+    input.onchange = async () => {
+      try {
+        const json = JSON.parse(await input.files[0].text());
+
+        if (json.layouts && typeof json.layouts === "object") {
+          setLayouts((current) => ({ ...current, ...json.layouts }));
+          return;
+        }
+
+        alert("This is not a Theme backup JSON.");
+      } catch {
+        alert("Invalid JSON backup.");
+      }
+    };
+
+    input.click();
+  }
+
+  const totalPhotos = theme.sections.reduce(
+    (sum, section) => sum + (layouts[section.key]?.length || 0),
+    0
+  );
+
+  return (
+    <main>
+      <header>
+        <div>
+          <h1>Exhibition Wall Planner</h1>
+          <p>
+            Three exhibition themes · A0 / A1 / A2 · portrait + landscape ·
+            autosaved
+          </p>
+        </div>
+
+        <select
+          value={themeKey}
+          onChange={(e) => setThemeKey(e.target.value)}
+        >
+          {Object.entries(THEMES).map(([key, item]) => (
+            <option value={key} key={key}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+      </header>
+
+      <section className="toolbar">
+        <div>
+          {Object.keys(PAPER).map((size) => (
+            <button key={size} onClick={() => addFrame(size)}>
+              Add {size}
+            </button>
+          ))}
+        </div>
+
+        <div>
+          <button onClick={() => setClean((v) => !v)}>
+            {clean ? "Edit" : "Clean preview"}
+          </button>
+          <button onClick={exportPNG}>Export Theme PNG</button>
+          <button onClick={backupJSON}>Backup Theme JSON</button>
+          <button onClick={restoreJSON}>Restore JSON</button>
+        </div>
+      </section>
+
+      <div className="themeMeta">
+        <div>
+          <strong>{theme.label}</strong>
+          <span>
+            {theme.sections.length === 2
+              ? "Two physical sections shown together"
+              : "One physical section"}
+          </span>
+        </div>
+        <b>{totalPhotos} photographs</b>
+      </div>
+
+      <div className="themeCapture" ref={themeRef}>
+        {theme.sections.map((section, index) => {
+          const tiles = layouts[section.key] || [];
+
+          return (
+            <section className="wallGroup" key={section.key}>
+              <div className="wallHeading">
+                <strong>
+                  {theme.label} · Section {index + 1}
+                </strong>
+                <span>{section.label}</span>
+                <span>{tiles.length} photographs</span>
+              </div>
+
+              <div className="wallScroll">
+                <div
+                  className="wall"
+                  ref={(node) => {
+                    sectionRefs.current[section.key] = node;
+                  }}
+                  style={{
+                    width: section.width * SCALE,
+                    height: section.height * SCALE,
+                  }}
+                  onMouseMove={(e) => pointerMove(e, section)}
+                  onMouseUp={() => {
+                    drag.current = null;
+                  }}
+                  onMouseLeave={() => {
+                    drag.current = null;
+                  }}
+                >
+                  <div className="eyeLine" />
+
+                  {tiles.map((tile) => {
+                    const [w, h] = tileSize(tile);
+                    const token = `${section.key}:${tile.id}`;
+
+                    return (
+                      <div
+                        key={tile.id}
+                        className={
+                          "tile " + (selected === token ? "selected" : "")
+                        }
+                        style={{
+                          left: tile.x * SCALE,
+                          top: tile.y * SCALE,
+                          width: w * SCALE,
+                          height: h * SCALE,
+                          backgroundImage: tile.img
+                            ? `url("${tile.img}")`
+                            : "none",
+                        }}
+                        onMouseDown={(e) =>
+                          pointerDown(e, section, tile)
+                        }
+                        onClick={() =>
+                          showControls(section.key, tile.id)
+                        }
+                        onDoubleClick={() =>
+                          choosePhoto(section.key, tile.id)
+                        }
+                      >
+                        {!tile.img && (
+                          <span>
+                            {tile.size}
+                            <small>
+                              {tile.orientation === "P"
+                                ? "portrait"
+                                : "landscape"}
+                            </small>
+                          </span>
+                        )}
+
+                        {!clean && selected === token && (
+                          <div
+                            className="actions"
+                            onMouseDown={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              onClick={() =>
+                                choosePhoto(section.key, tile.id)
+                              }
+                            >
+                              {tile.img ? "Replace" : "Photo"}
+                            </button>
+                            <button
+                              onClick={() =>
+                                rotate(section.key, tile.id)
+                              }
+                            >
+                              Rotate
+                            </button>
+                            <button
+                              className="danger"
+                              onClick={() =>
+                                remove(section.key, tile.id)
+                              }
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+          );
+        })}
+      </div>
+
+      <footer>
+        Add frames randomly to the current theme · double-click a frame to add
+        or replace a photograph · drag to position · click for controls
+      </footer>
+    </main>
+  );
+}
