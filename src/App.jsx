@@ -132,7 +132,7 @@ export default function App() {
             <div
               className={"wallBlock " + (selectedWall === wall.id ? "selectedWall" : "")}
               key={wall.id}
-              onClick={() => { setSelectedWall(wall.id); setSelectedItem(null); }}
+              onClick={(e) => { if (e.target === e.currentTarget || e.target.classList.contains("wall") || e.target.classList.contains("centerline")) { setSelectedWall(wall.id); } }}
             >
               <div className="wallHeading">
                 <h3>{wall.theme} · {wall.section}</h3>
@@ -152,6 +152,7 @@ export default function App() {
                       key={item.id}
                       className={"frame " + (chosen ? "chosen" : "")}
                       style={{ left: `${left}%`, width: `${width}%`, height: `${height}%` }}
+                      onClick={e => { e.stopPropagation(); setSelectedWall(wall.id); setSelectedItem(item.id); }}
                       onPointerDown={e => dragStart(e, wall, item)}
                       onDoubleClick={e => {
                         e.stopPropagation();
@@ -161,7 +162,7 @@ export default function App() {
                       {item.image ? <img src={item.image} alt="" /> : <div className="placeholder"><b>{item.size}</b><small>{item.orientation}</small></div>}
                       <input type="file" accept="image/*" hidden onChange={e => photo(wall.id, item, e.target.files?.[0])} />
                       {chosen && (
-                        <div className="controls" onPointerDown={e => e.stopPropagation()}>
+                        <div className="controls" onPointerDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
                           <button onClick={() => rotate(wall.id, item)}>Rotate</button>
                           <button onClick={e => e.currentTarget.parentElement.parentElement.querySelector("input").click()}>Photo</button>
                           <button onClick={() => remove(wall.id, item.id)}>Delete</button>
