@@ -10,3 +10,32 @@
   pointer-events: auto;
   cursor: pointer;
 }
+
+
+/* --- GLOBAL EXHIBITION SCALE ---
+   22 m = 100% available planner width.
+   15.7 m = 71.36%.
+   9.4 m = 42.73%.
+   Height and all artwork remain on the same metre-to-pixel scale.
+*/
+.wall {
+  margin-right: auto;
+  max-width: 100%;
+}
+
+.wallBlock {
+  overflow: visible;
+}
+
+/* Keep headings aligned to the actual physical wall width */
+.wallHeading {
+  width: var(--wall-display-width, 100%);
+}
+
+/* On narrow screens we keep the physical ratios and allow horizontal room
+   rather than independently stretching shorter walls. */
+@media (max-width: 800px) {
+  .wall {
+    min-height: 0;
+  }
+}
