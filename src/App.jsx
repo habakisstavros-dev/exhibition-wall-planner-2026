@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import html2canvas from "html2canvas";
 import "./styles.css";
 
 const WALLS = [
@@ -91,6 +92,76 @@ export default function App() {
     window.addEventListener("pointerup", up);
   }
 
+  function saveExhibition() {
+    const payload = {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      walls: WALLS,
+      items
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `exhibition-wall-planner-${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function loadExhibition(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        const restored = parsed?.items || parsed;
+        if (!restored || typeof restored !== "object") throw new Error("Invalid file");
+        const normalized = Object.fromEntries(
+          WALLS.map(w => [w.id, Array.isArray(restored[w.id]) ? restored[w.id] : []])
+        );
+        setItems(normalized);
+        setSelectedItem(null);
+        alert("Exhibition restored successfully.");
+      } catch {
+        alert("This does not look like a valid Exhibition Wall Planner backup.");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  async function exportJpg() {
+    const target = document.getElementById("exhibition-export");
+    if (!target) return;
+
+    const previousItem = selectedItem;
+    setSelectedItem(null);
+
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+    try {
+      const canvas = await html2canvas(target, {
+        backgroundColor: "#090909",
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        windowWidth: target.scrollWidth,
+        windowHeight: target.scrollHeight
+      });
+      const link = document.createElement("a");
+      link.download = `exhibition-wall-plan-${new Date().toISOString().slice(0,10)}.jpg`;
+      link.href = canvas.toDataURL("image/jpeg", 0.95);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch {
+      alert("JPG export failed. Please try again after the photographs finish loading.");
+    } finally {
+      setSelectedItem(previousItem);
+    }
+  }
+
   function clean() {
     if (!confirm("Clear all frames from all five wall sections?")) return;
     setItems(Object.fromEntries(WALLS.map(w => [w.id, []])));
@@ -118,9 +189,26 @@ export default function App() {
         <div className="destination">
           Adding to: <strong>{selectedWallData?.theme} · {selectedWallData?.section} · {selectedWallData?.width} m</strong>
         </div>
-        <button onClick={clean}>Clean preview</button>
+        <div className="fileActions">
+          <button onClick={saveExhibition}>Save Exhibition</button>
+          <label className="loadButton">
+            Load Exhibition
+            <input
+              type="file"
+              accept=".json,application/json"
+              hidden
+              onChange={e => {
+                loadExhibition(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          <button onClick={exportJpg}>Export as JPG</button>
+          <button onClick={clean}>Clean preview</button>
+        </div>
       </div>
 
+      <div id="exhibition-export">
       {groups.map(group => (
         <section className="theme" key={group.title}>
           <div className="themeTitle">
@@ -183,6 +271,7 @@ export default function App() {
           ))}
         </section>
       ))}
+      </div>
     </main>
   );
 }
