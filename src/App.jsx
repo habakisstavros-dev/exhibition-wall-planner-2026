@@ -378,7 +378,7 @@ export default function App() {
                         e.currentTarget.querySelector("input").click();
                       }}
                     >
-                      {(photoUrls[item.id] || item.image) ? <img src={photoUrls[item.id] || item.image} alt="" /> : <div className="placeholder"><b>{item.size}</b><small>{item.orientation}</small></div>}
+                      {(photoUrls[item.id] || item.image) ? <img src={photoUrls[item.id] || item.image} alt="" draggable="false" onDragStart={e => e.preventDefault()} /> : <div className="placeholder"><b>{item.size}</b><small>{item.orientation}</small></div>}
                       <input type="file" accept="image/*" hidden onChange={e => photo(wall.id, item, e.target.files?.[0])} />
                       {chosen && (
                         <div className="controls" onPointerDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>

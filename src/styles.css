@@ -99,3 +99,17 @@
     width: 100%;
   }
 }
+
+
+/* --- PHOTO FRAME DRAG FIX ---
+   Images must never capture the browser's native image-drag gesture.
+   Pointer gestures go to the frame, so filled and empty frames drag identically.
+*/
+.frame img {
+  pointer-events: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-user-drag: none !important;
+  user-drag: none !important;
+  touch-action: none;
+}
