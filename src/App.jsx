@@ -27,12 +27,107 @@ function load() {
   return Object.fromEntries(WALLS.map(w => [w.id, []]));
 }
 
+
+const DB_NAME = "exhibition-wall-planner-2026";
+const DB_STORE = "photos";
+
+function openPhotoDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function putPhoto(id, blob) {
+  const db = await openPhotoDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DB_STORE, "readwrite");
+    tx.objectStore(DB_STORE).put(blob, id);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function getPhoto(id) {
+  const db = await openPhotoDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get(id);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function deletePhoto(id) {
+  const db = await openPhotoDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DB_STORE, "readwrite");
+    tx.objectStore(DB_STORE).delete(id);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function optimizeImage(file, maxSide = 1800, quality = 0.82) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, width, height);
+  bitmap.close?.();
+  return new Promise((resolve, reject) =>
+    canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("Image conversion failed")), "image/jpeg", quality)
+  );
+}
+
 export default function App() {
   const [items, setItems] = useState(load);
   const [selectedWall, setSelectedWall] = useState("w1a");
   const [selectedItem, setSelectedItem] = useState(null);
+  const [photoUrls, setPhotoUrls] = useState({});
 
-  useEffect(() => localStorage.setItem(key, JSON.stringify(items)), [items]);
+  // Only lightweight layout metadata goes into localStorage.
+  useEffect(() => {
+    const lightweight = Object.fromEntries(
+      Object.entries(items).map(([wallId, list]) => [
+        wallId,
+        list.map(({ image, ...item }) => item)
+      ])
+    );
+    localStorage.setItem(key, JSON.stringify(lightweight));
+  }, [items]);
+
+  // Load photo blobs from IndexedDB and create temporary browser URLs.
+  useEffect(() => {
+    let cancelled = false;
+    const liveUrls = [];
+    (async () => {
+      const ids = Object.values(items).flat().map(i => i.id);
+      const next = {};
+      for (const id of ids) {
+        try {
+          const blob = await getPhoto(id);
+          if (blob) {
+            const url = URL.createObjectURL(blob);
+            liveUrls.push(url);
+            next[id] = url;
+          }
+        } catch {}
+      }
+      if (!cancelled) setPhotoUrls(next);
+    })();
+    return () => {
+      cancelled = true;
+      liveUrls.forEach(URL.revokeObjectURL);
+    };
+  }, []);
 
   const selectedWallData = WALLS.find(w => w.id === selectedWall);
 
@@ -61,16 +156,34 @@ export default function App() {
     update(wallId, item.id, { orientation, w, h, x: Math.min(item.x, wall.width - w) });
   }
 
-  function remove(wallId, id) {
+  async function remove(wallId, id) {
     setItems(s => ({ ...s, [wallId]: (s[wallId] || []).filter(i => i.id !== id) }));
+    setPhotoUrls(s => {
+      if (s[id]) URL.revokeObjectURL(s[id]);
+      const next = { ...s };
+      delete next[id];
+      return next;
+    });
+    try { await deletePhoto(id); } catch {}
     setSelectedItem(null);
   }
 
-  function photo(wallId, item, file) {
+  async function photo(wallId, item, file) {
     if (!file) return;
-    const r = new FileReader();
-    r.onload = () => update(wallId, item.id, { image: r.result });
-    r.readAsDataURL(file);
+    try {
+      const blob = await optimizeImage(file);
+      await putPhoto(item.id, blob);
+      const url = URL.createObjectURL(blob);
+      setPhotoUrls(s => {
+        if (s[item.id]) URL.revokeObjectURL(s[item.id]);
+        return { ...s, [item.id]: url };
+      });
+      // Remove any legacy base64 image from state/localStorage.
+      update(wallId, item.id, { image: null });
+    } catch (err) {
+      console.error(err);
+      alert("Could not prepare this photograph. Please try another JPEG/PNG.");
+    }
   }
 
   function dragStart(e, wall, item) {
@@ -97,7 +210,13 @@ export default function App() {
       version: 1,
       savedAt: new Date().toISOString(),
       walls: WALLS,
-      items
+      items: Object.fromEntries(
+        Object.entries(items).map(([wallId, list]) => [
+          wallId,
+          list.map(({ image, ...item }) => item)
+        ])
+      ),
+      note: "Layout backup. Photographs are stored safely in this browser's IndexedDB."
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -119,7 +238,9 @@ export default function App() {
         const restored = parsed?.items || parsed;
         if (!restored || typeof restored !== "object") throw new Error("Invalid file");
         const normalized = Object.fromEntries(
-          WALLS.map(w => [w.id, Array.isArray(restored[w.id]) ? restored[w.id] : []])
+          WALLS.map(w => [w.id, Array.isArray(restored[w.id])
+            ? restored[w.id].map(({ image, ...item }) => item)
+            : []])
         );
         setItems(normalized);
         setSelectedItem(null);
@@ -162,8 +283,12 @@ export default function App() {
     }
   }
 
-  function clean() {
+  async function clean() {
     if (!confirm("Clear all frames from all five wall sections?")) return;
+    const ids = Object.values(items).flat().map(i => i.id);
+    await Promise.all(ids.map(id => deletePhoto(id).catch(() => {})));
+    Object.values(photoUrls).forEach(url => URL.revokeObjectURL(url));
+    setPhotoUrls({});
     setItems(Object.fromEntries(WALLS.map(w => [w.id, []])));
   }
 
@@ -253,7 +378,7 @@ export default function App() {
                         e.currentTarget.querySelector("input").click();
                       }}
                     >
-                      {item.image ? <img src={item.image} alt="" /> : <div className="placeholder"><b>{item.size}</b><small>{item.orientation}</small></div>}
+                      {(photoUrls[item.id] || item.image) ? <img src={photoUrls[item.id] || item.image} alt="" /> : <div className="placeholder"><b>{item.size}</b><small>{item.orientation}</small></div>}
                       <input type="file" accept="image/*" hidden onChange={e => photo(wall.id, item, e.target.files?.[0])} />
                       {chosen && (
                         <div className="controls" onPointerDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
